@@ -40,6 +40,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.NavigationLog
@@ -99,7 +101,10 @@ fun MainScreen(
                 .background(SightBlack)
         ) {
             if (isPrototypeMode || cameraPermissionState.status.isGranted) {
-                CameraActiveLayout(viewModel = viewModel)
+                CameraActiveLayout(
+                    viewModel = viewModel,
+                    hasCameraPermission = cameraPermissionState.status.isGranted
+                )
             } else {
                 CameraPermissionExplanationLayout(
                     onRequestPermission = { cameraPermissionState.launchPermissionRequest() }
@@ -181,7 +186,10 @@ fun CameraPermissionExplanationLayout(onRequestPermission: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CameraActiveLayout(viewModel: NavigationViewModel) {
+fun CameraActiveLayout(
+    viewModel: NavigationViewModel,
+    hasCameraPermission: Boolean
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -198,7 +206,13 @@ fun CameraActiveLayout(viewModel: NavigationViewModel) {
     val triggerTime by viewModel.triggerContinuousCapture.collectAsStateWithLifecycle()
     val speechSpeed by viewModel.speechSpeed.collectAsStateWithLifecycle()
 
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    val cameraProviderFuture = remember(hasCameraPermission) {
+        if (hasCameraPermission) {
+            ProcessCameraProvider.getInstance(context)
+        } else {
+            null
+        }
+    }
     var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
 
     // Reactively trigger capture in Continuous Scan Mode
@@ -222,43 +236,56 @@ fun CameraActiveLayout(viewModel: NavigationViewModel) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(280.dp)
-                    .background(SightSurface)
+                    .background(SightSurface),
+                contentAlignment = Alignment.Center
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        val previewView = PreviewView(ctx).apply {
-                            scaleType = PreviewView.ScaleType.FILL_CENTER
-                        }
-                        val executor = ContextCompat.getMainExecutor(ctx)
-                        cameraProviderFuture.addListener({
-                            val cameraProvider = cameraProviderFuture.get()
-                            val preview = CameraPreview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
+                if (hasCameraPermission && cameraProviderFuture != null) {
+                    AndroidView(
+                        factory = { ctx ->
+                            val previewView = PreviewView(ctx).apply {
+                                scaleType = PreviewView.ScaleType.FILL_CENTER
                             }
-                            
-                            val builtImageCapture = ImageCapture.Builder()
-                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                                .build()
-                            
-                            imageCapture = builtImageCapture
-                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                            val executor = ContextCompat.getMainExecutor(ctx)
+                            cameraProviderFuture.addListener({
+                                val cameraProvider = cameraProviderFuture.get()
+                                val preview = CameraPreview.Builder().build().also {
+                                    it.setSurfaceProvider(previewView.surfaceProvider)
+                                }
+                                
+                                val builtImageCapture = ImageCapture.Builder()
+                                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                    .build()
+                                
+                                imageCapture = builtImageCapture
+                                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-                            try {
-                                cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    cameraSelector,
-                                    preview,
-                                    builtImageCapture
-                                )
-                            } catch (e: Exception) {
-                                Log.e("CameraActiveLayout", "Camera binding failed", e)
-                            }
-                        }, executor)
-                        previewView
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                                try {
+                                    cameraProvider.unbindAll()
+                                    cameraProvider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        cameraSelector,
+                                        preview,
+                                        builtImageCapture
+                                    )
+                                } catch (e: Exception) {
+                                    Log.e("CameraActiveLayout", "Camera binding failed", e)
+                                }
+                            }, executor)
+                            previewView
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Custom animated simulated radar sweep for functional prototype mode
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(SightBlack),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        PrototypeRadarVisualizer()
+                    }
+                }
 
                 // Dark contrast overlay for visual accessibility gradients
                 Box(
@@ -985,6 +1012,95 @@ fun ScanningPulseAnimation() {
                 .fillMaxSize()
                 .background(SightYellow.copy(alpha = 0.2f), CircleShape)
                 .border(BorderStroke(3.dp, SightYellow), CircleShape)
+        )
+    }
+}
+
+@Composable
+fun PrototypeRadarVisualizer() {
+    val infiniteTransition = rememberInfiniteTransition(label = "RadarSweep")
+    val angle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "angle"
+    )
+
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.7f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    androidx.compose.foundation.Canvas(
+        modifier = Modifier
+            .size(180.dp)
+            .testTag("radar_canvas")
+    ) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val maxRadius = size.minDimension / 2f
+
+        // Grid concentric rings
+        drawCircle(
+            color = SightBorder.copy(alpha = 0.4f),
+            radius = maxRadius,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = 2f,
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+            )
+        )
+
+        drawCircle(
+            color = SightYellow.copy(alpha = 0.15f * pulseScale),
+            radius = maxRadius * 0.65f * pulseScale,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f)
+        )
+
+        drawCircle(
+            color = SightYellow.copy(alpha = 0.08f),
+            radius = maxRadius * 0.35f
+        )
+
+        // Radar scanner line and cone sweep
+        rotate(degrees = angle, pivot = center) {
+            drawArc(
+                brush = Brush.radialGradient(
+                    colors = listOf(SightYellow.copy(alpha = 0.4f), Color.Transparent),
+                    center = center,
+                    radius = maxRadius
+                ),
+                startAngle = -45f,
+                sweepAngle = 45f,
+                useCenter = true
+            )
+
+            drawLine(
+                color = SightYellow,
+                start = center,
+                end = center.copy(y = center.y - maxRadius),
+                strokeWidth = 3f
+            )
+        }
+
+        // Crosshairs target
+        drawLine(
+            color = SightGray.copy(alpha = 0.5f),
+            start = center.copy(x = center.x - 15f),
+            end = center.copy(x = center.x + 15f),
+            strokeWidth = 1.5f
+        )
+        drawLine(
+            color = SightGray.copy(alpha = 0.5f),
+            start = center.copy(y = center.y - 15f),
+            end = center.copy(y = center.y + 15f),
+            strokeWidth = 1.5f
         )
     }
 }
