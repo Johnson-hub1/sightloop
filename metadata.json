@@ -1,0 +1,6 @@
+{
+  "name": "SightLoop",
+  "description": "Real-time environment audio scene descriptions, custom haptic feedback patterns, and safety hazard alerts for individuals with visual impairment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
